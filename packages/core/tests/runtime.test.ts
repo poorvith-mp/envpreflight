@@ -252,4 +252,39 @@ channel = "1.75.0"
       expect(rustResult?.fix).toContain('rustup toolchain install 1.75.0');
     });
   });
+
+  describe('Bun, Deno, and Java checks (PMP-36)', () => {
+    it('detects Bun from .bun-version and passes when version satisfies', async () => {
+      await fs.writeFile(path.join(tempDir, '.bun-version'), '>=1.1.0\n');
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: { bun: async () => '1.1.20' },
+      });
+      const bunResult = results.find((r) => r.id === 'runtime.bun');
+      expect(bunResult).toBeDefined();
+      expect(bunResult?.severity).toBe('pass');
+      expect(bunResult?.actual).toBe('1.1.20');
+    });
+
+    it('detects Deno from deno.json and passes when installed', async () => {
+      await fs.writeFile(path.join(tempDir, 'deno.json'), '{"tasks": {}}\n');
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: { deno: async () => 'deno 1.45.0 (release, x86_64-pc-windows-msvc)' },
+      });
+      const denoResult = results.find((r) => r.id === 'runtime.deno');
+      expect(denoResult).toBeDefined();
+      expect(denoResult?.severity).toBe('pass');
+      expect(denoResult?.actual).toBe('1.45.0');
+    });
+
+    it('detects Java from pom.xml and passes when JDK matches', async () => {
+      await fs.writeFile(path.join(tempDir, 'pom.xml'), '<project><properties><java.version>17</java.version></properties></project>');
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: { java: async () => 'openjdk version "17.0.9" 2023-10-17' },
+      });
+      const javaResult = results.find((r) => r.id === 'runtime.java');
+      expect(javaResult).toBeDefined();
+      expect(javaResult?.severity).toBe('pass');
+      expect(javaResult?.actual).toBe('17.0.9');
+    });
+  });
 });

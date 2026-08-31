@@ -10,6 +10,9 @@ export interface RuntimeExecutors {
   python?: () => Promise<string>;
   go?: () => Promise<string>;
   rust?: () => Promise<string>;
+  bun?: () => Promise<string>;
+  deno?: () => Promise<string>;
+  java?: () => Promise<string>;
 }
 
 export interface RuntimeCheckOptions {
@@ -91,6 +94,24 @@ export async function checkRuntime(
     options.runtimeExecutors?.rust ??
     (async () => {
       return await executeCommand('rustc', ['--version'], timeoutMs);
+    });
+
+  const bunExecutor =
+    options.runtimeExecutors?.bun ??
+    (async () => {
+      return await executeCommand('bun', ['--version'], timeoutMs);
+    });
+
+  const denoExecutor =
+    options.runtimeExecutors?.deno ??
+    (async () => {
+      return await executeCommand('deno', ['--version'], timeoutMs);
+    });
+
+  const javaExecutor =
+    options.runtimeExecutors?.java ??
+    (async () => {
+      return await executeCommand('java', ['-version'], timeoutMs);
     });
 
   // 1. Node.js check
@@ -432,6 +453,151 @@ export async function checkRuntime(
           });
         }
       }
+    }
+  }
+
+  // 5. Bun check
+  const bunVersionPath = path.join(targetDir, '.bun-version');
+  const bunVersionContent = await readFileQuiet(bunVersionPath);
+  let expectedBun: string | undefined;
+  if (bunVersionContent !== null) {
+    expectedBun = bunVersionContent.trim();
+  } else if (pkgJsonContent !== null) {
+    try {
+      const parsed = JSON.parse(pkgJsonContent);
+      if (typeof parsed.packageManager === 'string' && parsed.packageManager.startsWith('bun@')) {
+        expectedBun = parsed.packageManager.split('@')[1];
+      }
+    } catch {}
+  }
+  if (expectedBun) {
+    let actualRaw: string | undefined;
+    let actualInstalled = true;
+    try {
+      actualRaw = await bunExecutor();
+    } catch {
+      actualInstalled = false;
+    }
+    if (!actualInstalled || !actualRaw) {
+      results.push({
+        id: 'runtime.bun',
+        label: 'Bun',
+        category: 'Runtime',
+        severity: 'fail',
+        expected: expectedBun,
+        actual: 'not installed',
+        message: `Bun is not installed (project wants ${expectedBun})`,
+        fix: `curl -fsSL https://bun.sh/install | bash`,
+      });
+    } else {
+      const actualClean = cleanVersion(actualRaw);
+      const satisfies = semver.satisfies(actualClean, toSemverRange(expectedBun));
+      results.push({
+        id: 'runtime.bun',
+        label: 'Bun',
+        category: 'Runtime',
+        severity: satisfies ? 'pass' : 'fail',
+        expected: expectedBun,
+        actual: actualClean,
+        message: satisfies ? `${actualClean} (satisfies ${expectedBun})` : `${actualClean} does not satisfy ${expectedBun}`,
+        fix: satisfies ? undefined : `bun upgrade`,
+      });
+    }
+  }
+
+  // 6. Deno check
+  const denoVersionPath = path.join(targetDir, '.deno-version');
+  const denoJsonPath = path.join(targetDir, 'deno.json');
+  const denoVersionContent = await readFileQuiet(denoVersionPath);
+  const denoJsonContent = await readFileQuiet(denoJsonPath);
+  let expectedDeno: string | undefined;
+  if (denoVersionContent !== null) {
+    expectedDeno = denoVersionContent.trim();
+  } else if (denoJsonContent !== null) {
+    expectedDeno = '>=1.0.0';
+  }
+  if (expectedDeno) {
+    let actualRaw: string | undefined;
+    let actualInstalled = true;
+    try {
+      actualRaw = await denoExecutor();
+    } catch {
+      actualInstalled = false;
+    }
+    if (!actualInstalled || !actualRaw) {
+      results.push({
+        id: 'runtime.deno',
+        label: 'Deno',
+        category: 'Runtime',
+        severity: 'fail',
+        expected: expectedDeno,
+        actual: 'not installed',
+        message: `Deno is not installed (project wants ${expectedDeno})`,
+        fix: `curl -fsSL https://deno.land/install.sh | sh`,
+      });
+    } else {
+      const actualClean = cleanVersion(actualRaw);
+      const satisfies = semver.satisfies(actualClean, toSemverRange(expectedDeno));
+      results.push({
+        id: 'runtime.deno',
+        label: 'Deno',
+        category: 'Runtime',
+        severity: satisfies ? 'pass' : 'fail',
+        expected: expectedDeno,
+        actual: actualClean,
+        message: satisfies ? `${actualClean} (satisfies ${expectedDeno})` : `${actualClean} does not satisfy ${expectedDeno}`,
+        fix: satisfies ? undefined : `deno upgrade`,
+      });
+    }
+  }
+
+  // 7. Java check
+  const javaVersionPath = path.join(targetDir, '.java-version');
+  const pomXmlPath = path.join(targetDir, 'pom.xml');
+  const javaVersionContent = await readFileQuiet(javaVersionPath);
+  const pomXmlContent = await readFileQuiet(pomXmlPath);
+  let expectedJava: string | undefined;
+  if (javaVersionContent !== null) {
+    expectedJava = javaVersionContent.trim();
+  } else if (pomXmlContent !== null) {
+    const match = pomXmlContent.match(/<(?:java\.version|maven\.compiler\.source)>([^<]+)<\//);
+    if (match) {
+      expectedJava = match[1].trim();
+    }
+  }
+  if (expectedJava) {
+    let actualRaw: string | undefined;
+    let actualInstalled = true;
+    try {
+      actualRaw = await javaExecutor();
+    } catch {
+      actualInstalled = false;
+    }
+    if (!actualInstalled || !actualRaw) {
+      results.push({
+        id: 'runtime.java',
+        label: 'Java',
+        category: 'Runtime',
+        severity: 'fail',
+        expected: expectedJava,
+        actual: 'not installed',
+        message: `Java is not installed (project wants ${expectedJava})`,
+        fix: `Install JDK ${expectedJava} via SDKMAN or package manager`,
+      });
+    } else {
+      const actualClean = cleanVersion(actualRaw);
+      const coercedActual = semver.coerce(actualClean)?.version || actualClean;
+      const satisfies = actualClean.includes(expectedJava) || (semver.valid(coercedActual) && semver.satisfies(coercedActual, toSemverRange(expectedJava)));
+      results.push({
+        id: 'runtime.java',
+        label: 'Java',
+        category: 'Runtime',
+        severity: satisfies ? 'pass' : 'fail',
+        expected: expectedJava,
+        actual: actualClean,
+        message: satisfies ? `${actualClean} (satisfies ${expectedJava})` : `${actualClean} does not satisfy ${expectedJava}`,
+        fix: satisfies ? undefined : `Install JDK ${expectedJava}`,
+      });
     }
   }
 
