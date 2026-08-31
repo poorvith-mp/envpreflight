@@ -12,3 +12,10 @@ coverage/
 .system_generated/
 *.log
 semgrep-report.json
+
+# Environment & Secrets
+.env
+.env*
+*.env
+.env.local
+.env*.local
