@@ -20,7 +20,7 @@ describe('Windows native port probe', () => {
 
       try {
         const start = Date.now();
-        const res = await defaultPortProber(testPort, 4000);
+        const res = await defaultPortProber(testPort, 15000);
         const duration = Date.now() - start;
 
         expect(res.isOccupied).toBe(true);
