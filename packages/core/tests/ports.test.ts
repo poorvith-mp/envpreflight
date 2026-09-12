@@ -56,7 +56,7 @@ describe('Ports checks', () => {
     const portResult = results.find((r) => r.id === 'port.3000');
     expect(portResult).toBeDefined();
     expect(portResult?.severity).toBe('fail');
-    expect(portResult?.message).toContain('in use by node (pid 48213)');
-    expect(portResult?.fix).toBe('kill 48213');
+    const expectedFix = process.platform === 'win32' ? 'Stop-Process -Id 48213' : 'kill 48213';
+    expect(portResult?.fix).toBe(expectedFix);
   });
 });

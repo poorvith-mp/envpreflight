@@ -61,26 +61,42 @@ Ports
 
 | Check Area | Supported Manifests & Detection | Fix Suggestions |
 | :--- | :--- | :--- |
-| **Node.js** | `.nvmrc`, `package.json` (`engines.node`) | `nvm install <ver> && nvm use <ver>` |
-| **Python** | `pyproject.toml` (`requires-python`), `.python-version` | `pyenv install <ver> && pyenv local <ver>` |
-| **Go** | `go.mod` | `brew install go@<ver>` |
-| **Rust** | `rust-toolchain.toml`, `rust-toolchain` | `rustup toolchain install <ver>` |
+| **Tool Versions** | `.tool-versions`, `mise.toml` (`[tools]`) | `mise install` / tool version manager |
+| **Node.js** | `.tool-versions`, `mise.toml`, `.nvmrc`, `package.json` (`engines.node`) | `nvm install <ver> && nvm use <ver>` |
+| **Python** | `.tool-versions`, `mise.toml`, `pyproject.toml` (`requires-python`), `.python-version` | `pyenv install <ver> && pyenv local <ver>` |
+| **Go** | `.tool-versions`, `mise.toml`, `go.mod` | `brew install go@<ver>` |
+| **Rust** | `.tool-versions`, `mise.toml`, `rust-toolchain.toml`, `rust-toolchain` | `rustup toolchain install <ver>` |
 | **Services** | Postgres (5432), Redis (6379), MySQL (3306), MongoDB (27017) | `docker compose up -d <svc>` / `brew services start <svc>` |
 | **Docker** | Docker daemon responsiveness, `docker-compose.yml` service states | `open -a Docker`, `docker compose up -d` |
 | **Environment** | Keys diff between `.env.example` and `.env` | `cp .env.example .env` or missing key names |
-| **Ports** | Application ports from `.env.example` / compose / configs | `kill <pid>` |
+| **Ports** | Application ports from `.env.example` / compose / configs | `kill <pid>` (POSIX) / `Stop-Process -Id <pid>` (Windows) |
 
 ---
 
-## CLI Flags
+## CLI Commands & Flags
+
+### Commands
+
+| Command | Description |
+| :--- | :--- |
+| `envpreflight [options]` | Run pre-flight checks against project (default command) |
+| `envpreflight init [--force]` | Initialize a `.envpreflightrc.json` configuration file |
+| `envpreflight undo` | Undo non-destructive changes from the last `--fix` run |
+
+### Options
 
 | Flag | Description |
 | :--- | :--- |
 | *(default)* | Run all detected checks against the current working directory |
-| `--json` | Emit pure machine-readable `Report` JSON (ideal for CI / scripts) |
+| `--format <type>` | Output format: `terminal` (default), `json`, or `github` (annotations & summary) |
+| `--json` | Alias for `--format json` |
 | `--only <ids>` | Comma-separated list of check IDs or categories (e.g. `--only runtime,services`) |
 | `--skip <ids>` | Comma-separated list of check IDs or categories to skip |
-| `--fix` | Interactively prompt before executing suggested fix commands |
+| `--fix` | Present and execute suggested fixes interactively |
+| `--dry-run` | Show fix plan without executing (requires `--fix`) |
+| `-y, --yes` | Non-interactive mode; auto-confirm safe fixes (requires `--fix`) |
+| `--workspace <dir>` | Run checks against a specific workspace directory |
+| `--no-workspaces` | Disable monorepo workspace discovery and scan root only |
 | `-q, --quiet` | Display failures and warnings only |
 | `--cwd <path>` | Target a specific project directory |
 | `--version` | Print current version |

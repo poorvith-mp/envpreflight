@@ -287,4 +287,100 @@ channel = "1.75.0"
       expect(javaResult?.actual).toBe('17.0.9');
     });
   });
+
+  describe('.tool-versions and mise.toml integration', () => {
+    it('checks node and python from .tool-versions and skips ruby with no ruby check', async () => {
+      await fs.writeFile(
+        path.join(tempDir, '.tool-versions'),
+        'nodejs 20.11.0\npython 3.12.1 3.11\nruby 3.3.0\n'
+      );
+
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: {
+          node: async () => 'v20.11.0',
+          python: async () => 'Python 3.12.1',
+        },
+      });
+
+      const nodeResult = results.find((r) => r.id === 'runtime.node');
+      expect(nodeResult).toBeDefined();
+      expect(nodeResult?.severity).toBe('pass');
+      expect(nodeResult?.expected).toContain('.tool-versions');
+
+      const pythonResult = results.find((r) => r.id === 'runtime.python');
+      expect(pythonResult).toBeDefined();
+      expect(pythonResult?.severity).toBe('pass');
+      expect(pythonResult?.expected).toContain('.tool-versions');
+
+      const rubyResult = results.find((r) => r.id === 'runtime.ruby');
+      expect(rubyResult).toBeDefined();
+      expect(rubyResult?.severity).toBe('skipped');
+      expect(rubyResult?.skipReason).toBe('no ruby check');
+    });
+
+    it('suggests mise install on failure when declared by .tool-versions', async () => {
+      await fs.writeFile(path.join(tempDir, '.tool-versions'), 'nodejs 22.0.0\n');
+
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: {
+          node: async () => 'v20.11.0',
+        },
+      });
+
+      const nodeResult = results.find((r) => r.id === 'runtime.node');
+      expect(nodeResult?.severity).toBe('fail');
+      expect(nodeResult?.fix).toBe('mise install');
+    });
+
+    it('.tool-versions takes precedence over .nvmrc and package.json engines', async () => {
+      await fs.writeFile(path.join(tempDir, '.tool-versions'), 'nodejs 20.11.0\n');
+      await fs.writeFile(path.join(tempDir, '.nvmrc'), '18.0.0\n');
+      await fs.writeFile(path.join(tempDir, 'package.json'), JSON.stringify({ engines: { node: '>=22' } }));
+
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: { node: async () => 'v20.11.0' },
+      });
+
+      const nodeResult = results.find((r) => r.id === 'runtime.node');
+      expect(nodeResult?.severity).toBe('pass');
+      expect(nodeResult?.expected).toContain('20.11.0');
+      expect(nodeResult?.expected).toContain('.tool-versions');
+    });
+
+    it('skips system version with reason', async () => {
+      await fs.writeFile(path.join(tempDir, '.tool-versions'), 'nodejs system\n');
+
+      const results = await checkRuntime(tempDir);
+      const nodeResult = results.find((r) => r.id === 'runtime.node');
+      expect(nodeResult?.severity).toBe('skipped');
+      expect(nodeResult?.skipReason).toBe('system version specified');
+    });
+
+    it('checks mise.toml tools table and handles unsupported syntax by skipping only that tool', async () => {
+      await fs.writeFile(
+        path.join(tempDir, 'mise.toml'),
+        `[tools]
+node = "22"
+python = ["3.12", "3.11"]
+golang = { version = "1.22" }
+`
+      );
+
+      const results = await checkRuntime(tempDir, {
+        runtimeExecutors: {
+          node: async () => 'v22.2.0',
+          python: async () => 'Python 3.12.0',
+        },
+      });
+
+      const nodeResult = results.find((r) => r.id === 'runtime.node');
+      expect(nodeResult?.severity).toBe('pass');
+      expect(nodeResult?.expected).toContain('mise.toml');
+
+      const pythonResult = results.find((r) => r.id === 'runtime.python');
+      expect(pythonResult?.severity).toBe('pass');
+      expect(pythonResult?.expected).toContain('3.12');
+      expect(pythonResult?.expected).toContain('mise.toml');
+    });
+  });
 });

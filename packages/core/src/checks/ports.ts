@@ -26,9 +26,8 @@ async function readFileQuiet(filePath: string): Promise<string | null> {
   }
 }
 
-export const defaultPortProber: PortProber = async (port: number, timeoutMs = 2000): Promise<PortProbeResult> => {
-  // First, probe if port is occupied via net.createServer
-  const isOccupied = await new Promise<boolean>((resolve) => {
+async function isPortOccupiedOnHost(port: number, host: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
     const server = net.createServer();
 
     server.once('error', (err: any) => {
@@ -46,63 +45,90 @@ export const defaultPortProber: PortProber = async (port: number, timeoutMs = 20
     });
 
     try {
-      server.listen(port, '0.0.0.0');
+      server.listen({ port, host, exclusive: true });
     } catch {
       resolve(true);
     }
   });
+}
 
-  if (!isOccupied) {
+export async function isPortOccupied(port: number): Promise<boolean> {
+  const on127 = await isPortOccupiedOnHost(port, '127.0.0.1');
+  if (on127) return true;
+  const on0 = await isPortOccupiedOnHost(port, '0.0.0.0');
+  return on0;
+}
+
+async function resolveProcessWindows(port: number, timeoutMs = 2000): Promise<{ pid?: number; processName?: string }> {
+  try {
+    const res = await execa(
+      'powershell',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess`,
+      ],
+      { timeout: timeoutMs }
+    );
+    const pidStr = (res.stdout || '').trim();
+    const pid = parseInt(pidStr, 10);
+    if (!isNaN(pid) && pid > 0) {
+      let processName: string | undefined;
+      try {
+        const nameRes = await execa(
+          'powershell',
+          [
+            '-NoProfile',
+            '-NonInteractive',
+            '-Command',
+            `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).ProcessName`,
+          ],
+          { timeout: 1000 }
+        );
+        processName = (nameRes.stdout || '').trim() || undefined;
+      } catch {}
+      return { pid, processName };
+    }
+  } catch {}
+  return {};
+}
+
+async function resolveProcessPosix(port: number, timeoutMs = 2000): Promise<{ pid?: number; processName?: string }> {
+  try {
+    const lsof = await execa('lsof', ['-i', `:${port}`, '-sTCP:LISTEN', '-n', '-P'], { timeout: timeoutMs });
+    const lines = lsof.stdout.split('\n').filter(Boolean);
+    if (lines.length > 1) {
+      const parts = lines[1].trim().split(/\s+/);
+      const processName = parts[0];
+      const pid = parseInt(parts[1], 10);
+      return { pid: isNaN(pid) ? undefined : pid, processName };
+    }
+  } catch {}
+  return {};
+}
+
+export const defaultPortProber: PortProber = async (port: number, timeoutMs = 2000): Promise<PortProbeResult> => {
+  const occupied = await isPortOccupied(port);
+  if (!occupied) {
     return { isOccupied: false };
   }
 
-  // Try to find process name and PID
-  let processName: string | undefined;
-  let pid: number | undefined;
+  const proc =
+    process.platform === 'win32'
+      ? await resolveProcessWindows(port, timeoutMs)
+      : await resolveProcessPosix(port, timeoutMs);
 
-  try {
-    if (process.platform === 'win32') {
-      const netstat = await execa('netstat', ['-ano'], { timeout: timeoutMs });
-      const lines = netstat.stdout.split('\n');
-      for (const line of lines) {
-        if (line.includes(`:${port}`) && line.includes('LISTENING')) {
-          const parts = line.trim().split(/\s+/);
-          const foundPid = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(foundPid) && foundPid > 0) {
-            pid = foundPid;
-            try {
-              const tasklist = await execa('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { timeout: 1000 });
-              const nameMatch = tasklist.stdout.match(/^"([^"]+)"/);
-              if (nameMatch) {
-                processName = nameMatch[1];
-              }
-            } catch {
-              processName = 'process';
-            }
-            break;
-          }
-        }
-      }
-    } else {
-      const lsof = await execa('lsof', ['-i', `:${port}`, '-sTCP:LISTEN', '-n', '-P'], { timeout: timeoutMs });
-      const lines = lsof.stdout.split('\n').filter(Boolean);
-      if (lines.length > 1) {
-        const parts = lines[1].trim().split(/\s+/);
-        processName = parts[0];
-        pid = parseInt(parts[1], 10);
-      }
-    }
-  } catch {
-    // Process lookup failed or not permitted
-  }
-
-  return { isOccupied: true, processName, pid };
+  return {
+    isOccupied: true,
+    pid: proc.pid,
+    processName: proc.processName,
+  };
 };
 
 export async function detectRequiredPorts(targetDir: string): Promise<number[]> {
   const ports = new Set<number>();
 
-  // 1. Check .env.example / .env
   const envCandidates = ['.env.example', '.env.sample', '.env.template', '.env'];
   for (const name of envCandidates) {
     const content = await readFileQuiet(path.join(targetDir, name));
@@ -120,7 +146,6 @@ export async function detectRequiredPorts(targetDir: string): Promise<number[]> 
     }
   }
 
-  // 2. Check docker-compose ports
   const composeCandidates = ['docker-compose.yml', 'docker-compose.yaml', 'compose.yml', 'compose.yaml'];
   for (const name of composeCandidates) {
     const content = await readFileQuiet(path.join(targetDir, name));
@@ -135,7 +160,6 @@ export async function detectRequiredPorts(targetDir: string): Promise<number[]> 
               const parts = str.split(':');
               const hostPort = parseInt(parts[0].replace(/[^0-9]/g, ''), 10);
               if (hostPort > 0 && hostPort <= 65535) {
-                // Ignore standard database ports here as they are handled in services check
                 if (![5432, 6379, 3306, 27017].includes(hostPort)) {
                   ports.add(hostPort);
                 }
@@ -143,9 +167,7 @@ export async function detectRequiredPorts(targetDir: string): Promise<number[]> 
             }
           }
         }
-      } catch {
-        // Ignored
-      }
+      } catch {}
     }
   }
 
@@ -181,7 +203,9 @@ export async function checkPorts(
         ? `pid ${probe.pid}`
         : 'another process';
 
-      const fix = probe.pid ? `kill ${probe.pid}` : undefined;
+      const fix = probe.pid
+        ? (process.platform === 'win32' ? `Stop-Process -Id ${probe.pid}` : `kill ${probe.pid}`)
+        : undefined;
 
       results.push({
         id: `port.${port}`,

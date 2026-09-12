@@ -1,6 +1,6 @@
 {
   "name": "@envpreflight/cli",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Check your machine can actually run this project — before you waste a day finding out it can't.",
   "type": "module",
   "author": "Poorvith M P",

@@ -1,6 +1,6 @@
 {
   "name": "@envpreflight/core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Core check logic for envpreflight with zero UI dependencies",
   "type": "module",
   "author": "Poorvith M P",

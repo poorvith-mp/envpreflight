@@ -1,6 +1,7 @@
 {
   "name": "envpreflight-monorepo",
-  "version": "0.1.0",
+  "version": "1.1.0",
+  "description": "Pre-flight checks for development environments",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.5",

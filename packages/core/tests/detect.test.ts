@@ -64,4 +64,20 @@ describe('detectManifests', () => {
     expect(result.hasEnvExample).toBe(true);
     expect(result.hasEnv).toBe(true);
   });
+
+  it('detects .tool-versions, mise.toml, and .node-version manifests', async () => {
+    await fs.writeFile(path.join(tempDir, '.tool-versions'), 'nodejs 20.11.0\n');
+    await fs.writeFile(path.join(tempDir, 'mise.toml'), '[tools]\npython = "3.12"\n');
+    await fs.writeFile(path.join(tempDir, '.node-version'), '20.10.0\n');
+
+    const result = await detectManifests(tempDir);
+    expect(result.hasToolVersions).toBe(true);
+    expect(result.hasMiseToml).toBe(true);
+    expect(result.hasNodeVersionFile).toBe(true);
+    expect(result.hasNode).toBe(true);
+    expect(result.hasPython).toBe(true);
+    expect(result.manifestFiles).toContain('.tool-versions');
+    expect(result.manifestFiles).toContain('mise.toml');
+    expect(result.manifestFiles).toContain('.node-version');
+  });
 });

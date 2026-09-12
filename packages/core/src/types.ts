@@ -23,6 +23,9 @@ export interface DetectedManifests {
   hasNode: boolean;
   hasNvmrc: boolean;
   hasPackageJson: boolean;
+  hasNodeVersionFile: boolean;
+  hasToolVersions: boolean;
+  hasMiseToml: boolean;
   hasPython: boolean;
   hasPyprojectToml: boolean;
   hasPythonVersion: boolean;
@@ -41,4 +44,6 @@ export interface RunOptions {
   only?: string[];
   skip?: string[];
   timeoutMs?: number;
+  workspaces?: boolean;
+  workspace?: string;
 }

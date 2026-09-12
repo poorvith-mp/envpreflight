@@ -4,6 +4,7 @@ import semver from 'semver';
 import { parse as parseToml } from 'smol-toml';
 import { execa } from 'execa';
 import type { CheckResult } from '../types.js';
+import { ToolDefinition, parseToolVersions, parseMiseToml } from '../manifests/toolVersions.js';
 
 export interface RuntimeExecutors {
   node?: () => Promise<string>;
@@ -114,30 +115,75 @@ export async function checkRuntime(
       return await executeCommand('java', ['-version'], timeoutMs);
     });
 
+  // Parse .tool-versions and mise.toml first
+  const toolVersionsContent = await readFileQuiet(path.join(targetDir, '.tool-versions'));
+  const miseTomlContent = (await readFileQuiet(path.join(targetDir, 'mise.toml'))) ?? (await readFileQuiet(path.join(targetDir, '.mise.toml')));
+  const miseSourceName = (await readFileQuiet(path.join(targetDir, 'mise.toml'))) !== null ? 'mise.toml' : '.mise.toml';
+
+  const toolDefs = new Map<string, ToolDefinition>();
+  if (toolVersionsContent !== null) {
+    const parsed = parseToolVersions(toolVersionsContent, '.tool-versions');
+    for (const [k, v] of parsed) {
+      if (!toolDefs.has(k)) toolDefs.set(k, v);
+    }
+  }
+  if (miseTomlContent !== null) {
+    const parsed = parseMiseToml(miseTomlContent, miseSourceName);
+    for (const [k, v] of parsed) {
+      if (!toolDefs.has(k)) toolDefs.set(k, v);
+    }
+  }
+
+  // Ruby: detect only, no check yet, list as skipped
+  if (toolDefs.has('ruby')) {
+    const rubyDef = toolDefs.get('ruby')!;
+    results.push({
+      id: 'runtime.ruby',
+      label: 'Ruby',
+      category: 'Runtime',
+      severity: 'skipped',
+      skipReason: rubyDef.skipReason || 'no ruby check',
+      message: rubyDef.skipReason || 'no ruby check',
+    });
+  }
+
   // 1. Node.js check
+  const nodeToolDef = toolDefs.get('node');
   const nvmrcPath = path.join(targetDir, '.nvmrc');
+  const nodeVersionPath = path.join(targetDir, '.node-version');
   const pkgJsonPath = path.join(targetDir, 'package.json');
   const nvmrcContent = await readFileQuiet(nvmrcPath);
+  const nodeVersionContent = await readFileQuiet(nodeVersionPath);
   const pkgJsonContent = await readFileQuiet(pkgJsonPath);
 
-  if (nvmrcContent !== null || pkgJsonContent !== null) {
+  if (nodeToolDef || nvmrcContent !== null || nodeVersionContent !== null || pkgJsonContent !== null) {
     let expectedNode: string | undefined;
     let manifestSource = '';
     let malformedReason: string | undefined;
+    let fixCommand: string | undefined;
 
-    if (nvmrcContent !== null) {
+    if (nodeToolDef) {
+      if (nodeToolDef.skipReason) {
+        malformedReason = nodeToolDef.skipReason;
+      } else if (nodeToolDef.version) {
+        expectedNode = `${nodeToolDef.version} (${nodeToolDef.sourceFile})`;
+        manifestSource = nodeToolDef.sourceFile;
+        fixCommand = 'mise install';
+      }
+    } else if (nvmrcContent !== null) {
       expectedNode = nvmrcContent.trim();
       manifestSource = '.nvmrc';
+    } else if (nodeVersionContent !== null) {
+      expectedNode = nodeVersionContent.trim();
+      manifestSource = '.node-version';
     }
 
-    if (pkgJsonContent !== null) {
+    if (pkgJsonContent !== null && !expectedNode && !malformedReason) {
       try {
         const pkg = JSON.parse(pkgJsonContent);
         if (pkg.engines?.node) {
-          if (!expectedNode) {
-            expectedNode = pkg.engines.node.trim();
-            manifestSource = 'package.json engines.node';
-          }
+          expectedNode = pkg.engines.node.trim();
+          manifestSource = 'package.json engines.node';
         }
       } catch (err: any) {
         malformedReason = `Invalid JSON in package.json: ${err.message}`;
@@ -163,6 +209,11 @@ export async function checkRuntime(
         actualInstalled = false;
       }
 
+      const rawTarget = expectedNode.split(' ')[0];
+      const targetClean = cleanVersion(rawTarget);
+      const defaultFix = `nvm install ${targetClean} && nvm use ${targetClean}`;
+      const fix = fixCommand || defaultFix;
+
       if (!actualInstalled || !actualRaw) {
         results.push({
           id: 'runtime.node',
@@ -172,15 +223,15 @@ export async function checkRuntime(
           expected: expectedNode,
           actual: 'not installed',
           message: `Node.js is not installed (${manifestSource} wants ${expectedNode})`,
-          fix: `nvm install ${cleanVersion(expectedNode)} && nvm use ${cleanVersion(expectedNode)}`,
+          fix,
         });
       } else {
         const actualClean = cleanVersion(actualRaw);
         const actualCoerced = semver.coerce(actualClean)?.version || actualClean;
-        const validRange = toSemverRange(expectedNode);
+        const validRange = toSemverRange(rawTarget);
         const satisfies =
           semver.satisfies(actualCoerced, validRange) ||
-          actualClean.startsWith(cleanVersion(expectedNode));
+          actualClean.startsWith(targetClean);
 
         if (satisfies) {
           results.push({
@@ -201,7 +252,7 @@ export async function checkRuntime(
             expected: expectedNode,
             actual: actualClean,
             message: `${actualClean} (${manifestSource} wants ${expectedNode})`,
-            fix: `nvm install ${cleanVersion(expectedNode)} && nvm use ${cleanVersion(expectedNode)}`,
+            fix,
           });
         }
       }
@@ -209,28 +260,38 @@ export async function checkRuntime(
   }
 
   // 2. Python check
+  const pythonToolDef = toolDefs.get('python');
   const pyprojectPath = path.join(targetDir, 'pyproject.toml');
   const pyversionPath = path.join(targetDir, '.python-version');
   const pyprojectContent = await readFileQuiet(pyprojectPath);
   const pyversionContent = await readFileQuiet(pyversionPath);
 
-  if (pyprojectContent !== null || pyversionContent !== null) {
+  if (pythonToolDef || pyprojectContent !== null || pyversionContent !== null) {
     let expectedPython: string | undefined;
     let manifestSource = '';
     let malformedReason: string | undefined;
+    let fixCommand: string | undefined;
 
-    if (pyversionContent !== null) {
+    if (pythonToolDef) {
+      if (pythonToolDef.skipReason) {
+        malformedReason = pythonToolDef.skipReason;
+      } else if (pythonToolDef.version) {
+        expectedPython = `${pythonToolDef.version} (${pythonToolDef.sourceFile})`;
+        manifestSource = pythonToolDef.sourceFile;
+        fixCommand = 'mise install';
+      }
+    } else if (pyversionContent !== null) {
       expectedPython = pyversionContent.trim();
       manifestSource = '.python-version';
     }
 
-    if (pyprojectContent !== null) {
+    if (pyprojectContent !== null && !expectedPython && !malformedReason) {
       try {
         const parsed: any = parseToml(pyprojectContent);
         const reqPy =
           parsed.project?.['requires-python'] ||
           parsed.tool?.poetry?.dependencies?.python;
-        if (reqPy && !expectedPython) {
+        if (reqPy) {
           expectedPython = String(reqPy).trim();
           manifestSource = 'pyproject.toml';
         }
@@ -258,6 +319,11 @@ export async function checkRuntime(
         actualInstalled = false;
       }
 
+      const rawTarget = expectedPython.split(' ')[0];
+      const targetClean = cleanVersion(rawTarget);
+      const defaultFix = `pyenv install ${targetClean} && pyenv local ${targetClean}`;
+      const fix = fixCommand || defaultFix;
+
       if (!actualInstalled || !actualRaw) {
         results.push({
           id: 'runtime.python',
@@ -267,14 +333,13 @@ export async function checkRuntime(
           expected: expectedPython,
           actual: 'not installed',
           message: `Python is not installed (${manifestSource} wants ${expectedPython})`,
-          fix: `pyenv install ${cleanVersion(expectedPython)} && pyenv local ${cleanVersion(expectedPython)}`,
+          fix,
         });
       } else {
         const actualClean = cleanVersion(actualRaw);
         const actualCoerced = semver.coerce(actualClean)?.version || actualClean;
-        const targetClean = cleanVersion(expectedPython);
         const targetCoerced = semver.coerce(targetClean)?.version || targetClean;
-        const validRange = toSemverRange(expectedPython);
+        const validRange = toSemverRange(rawTarget);
 
         const satisfies =
           semver.satisfies(actualCoerced, validRange) ||
@@ -300,7 +365,7 @@ export async function checkRuntime(
             expected: expectedPython,
             actual: actualClean,
             message: `${actualClean} (${manifestSource} wants ${expectedPython})`,
-            fix: `pyenv install ${targetClean} && pyenv local ${targetClean}`,
+            fix,
           });
         }
       }

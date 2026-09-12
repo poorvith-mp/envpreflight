@@ -106,3 +106,47 @@ export function renderReport(report: Report, options: RenderOptions = {}): strin
 
   return lines.join('\n');
 }
+
+export function renderGitHubAnnotations(report: Report): string {
+  const lines: string[] = [];
+  for (const r of report.results) {
+    if (r.severity === 'fail') {
+      let detail = r.message;
+      if (r.expected && r.actual) {
+        detail = `${r.message} (expected ${r.expected}, found ${r.actual})`;
+      } else if (r.expected) {
+        detail = `${r.message} (expected ${r.expected})`;
+      }
+      lines.push(`::error title=${r.label}::${detail}`);
+    } else if (r.severity === 'warn') {
+      lines.push(`::warning title=${r.label}::${r.message}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+export function renderGitHubStepSummary(report: Report): string {
+  const lines: string[] = [];
+  lines.push(`### envpreflight · ${report.projectName || 'project'}`);
+  lines.push('');
+  lines.push('| Check | Status | Expected | Actual | Fix |');
+  lines.push('|---|---|---|---|---|');
+
+  const statusIcons: Record<Severity, string> = {
+    pass: '✅ pass',
+    warn: '⚠️ warn',
+    fail: '❌ fail',
+    skipped: '⚪ skipped',
+  };
+
+  for (const r of report.results) {
+    const status = statusIcons[r.severity] || r.severity;
+    const exp = r.expected ? r.expected.replace(/\|/g, '\\|') : '-';
+    const act = r.actual ? r.actual.replace(/\|/g, '\\|') : '-';
+    const fix = r.fix ? `\`${r.fix.replace(/\|/g, '\\|')}\`` : '-';
+    lines.push(`| ${r.label} | ${status} | ${exp} | ${act} | ${fix} |`);
+  }
+
+  lines.push('');
+  return lines.join('\n');
+}

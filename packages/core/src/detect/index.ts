@@ -13,6 +13,10 @@ async function fileExists(filePath: string): Promise<boolean> {
 
 export async function detectManifests(targetDir: string): Promise<DetectedManifests> {
   const hasNvmrc = await fileExists(path.join(targetDir, '.nvmrc'));
+  const hasNodeVersionFile = await fileExists(path.join(targetDir, '.node-version'));
+  const hasToolVersions = await fileExists(path.join(targetDir, '.tool-versions'));
+  const hasMiseToml = (await fileExists(path.join(targetDir, 'mise.toml'))) ||
+                      (await fileExists(path.join(targetDir, '.mise.toml')));
   const hasPackageJson = await fileExists(path.join(targetDir, 'package.json'));
   const hasPyprojectToml = await fileExists(path.join(targetDir, 'pyproject.toml'));
   const hasPythonVersion = await fileExists(path.join(targetDir, '.python-version'));
@@ -32,6 +36,10 @@ export async function detectManifests(targetDir: string): Promise<DetectedManife
   const hasEnv = await fileExists(path.join(targetDir, '.env'));
 
   const manifestFiles: string[] = [];
+  if (hasToolVersions) manifestFiles.push('.tool-versions');
+  if (await fileExists(path.join(targetDir, 'mise.toml'))) manifestFiles.push('mise.toml');
+  else if (await fileExists(path.join(targetDir, '.mise.toml'))) manifestFiles.push('.mise.toml');
+  if (hasNodeVersionFile) manifestFiles.push('.node-version');
   if (hasNvmrc) manifestFiles.push('.nvmrc');
   if (hasPackageJson) manifestFiles.push('package.json');
   if (hasPyprojectToml) manifestFiles.push('pyproject.toml');
@@ -52,15 +60,18 @@ export async function detectManifests(targetDir: string): Promise<DetectedManife
   if (hasEnv) manifestFiles.push('.env');
 
   return {
-    hasNode: hasNvmrc || hasPackageJson,
+    hasNode: hasNvmrc || hasPackageJson || hasNodeVersionFile || hasToolVersions || hasMiseToml,
     hasNvmrc,
     hasPackageJson,
-    hasPython: hasPyprojectToml || hasPythonVersion,
+    hasNodeVersionFile,
+    hasToolVersions,
+    hasMiseToml,
+    hasPython: hasPyprojectToml || hasPythonVersion || hasToolVersions || hasMiseToml,
     hasPyprojectToml,
     hasPythonVersion,
-    hasGo: hasGoMod,
+    hasGo: hasGoMod || hasToolVersions || hasMiseToml,
     hasGoMod,
-    hasRust: hasRustToolchain,
+    hasRust: hasRustToolchain || hasToolVersions || hasMiseToml,
     hasRustToolchain,
     hasDockerCompose,
     hasEnvExample,
