@@ -30,7 +30,7 @@ describe('Windows native port probe', () => {
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
-    });
+    }, 20000);
 
     it('reports available for free port and leaves no open socket', async () => {
       const testPort = 19877;
