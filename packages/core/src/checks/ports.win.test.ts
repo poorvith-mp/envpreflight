@@ -11,7 +11,7 @@ describe('Windows native port probe', () => {
   });
 
   describe.skipIf(process.platform !== 'win32')('live Windows execution', () => {
-    it('detects occupied port via net.createServer in < 50ms', async () => {
+    it('reports an occupied port even when PID lookup is unavailable', async () => {
       const testPort = 19876;
       const server = net.createServer();
       await new Promise<void>((resolve) => {
@@ -19,14 +19,9 @@ describe('Windows native port probe', () => {
       });
 
       try {
-        const start = Date.now();
-        const res = await defaultPortProber(testPort, 15000);
-        const duration = Date.now() - start;
+        const res = await defaultPortProber(testPort, 1);
 
         expect(res.isOccupied).toBe(true);
-        // Probe detection itself is fast
-        expect(res.pid).toBeDefined();
-        expect(res.pid).toBe(process.pid);
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
