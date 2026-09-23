@@ -8,7 +8,8 @@
   "scripts": {
     "build": "pnpm --filter \"@envpreflight/*\" run build",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "deploy:site": "npx wrangler@4.125.0 deploy"
   },
   "devDependencies": {
     "@types/node": "^22.13.4",
